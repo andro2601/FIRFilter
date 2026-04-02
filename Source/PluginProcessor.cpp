@@ -159,9 +159,7 @@ void FIRFilterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 
     updateCoefficients(getSampleRate());
 
-    // -----------------------------------------------------------
-    // 1. UPSample to 64-bit (Float -> Double)
-    // -----------------------------------------------------------
+    // Upsample to 64-bit (Float -> Double)
     for (int ch = 0; ch < numChannels; ++ch)
     {
         auto* floatRead = buffer.getReadPointer(ch);
@@ -172,14 +170,13 @@ void FIRFilterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         }
     }
 
-    // 1. Check if the buffer is silent
+    // Check if the buffer is silent
     if (buffer.getMagnitude(0, numSamples) < 0.000001f) // Roughly -120dB
     {
         // If the buffer is silent, we might still be 'ringing'
-        // For a simple demo, you can check if we've been silent for a few blocks
         if (++silentBlockCount > 100)
         {
-            return; // SKIP THE FILTER MATH
+            return; // skip the filter math
         }
     }
     else
@@ -198,8 +195,7 @@ void FIRFilterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     
     if (!lpIsBypassed) lowPass.process(juce::dsp::ProcessContextReplacing<double>(doubleBlock));
 
-    // 3. Cast back to 32-bit (Double -> Float) for the DAW
-    // -----------------------------------------------------------
+    // Cast back to 32-bit (Double -> Float) for the DAW
     for (int ch = 0; ch < numChannels; ++ch)
     {
         auto* doubleRead = doubleBuffer.getReadPointer(ch);
@@ -265,7 +261,7 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
 				break;
         }
         
-        if (std::abs(n - delay) < 1e-9)
+        if (std::abs(n - delay) < 1e-9) // centralni član
         {
             hHP.at(n) = (1.0 - (wcHP / juce::MathConstants<double>::pi)) * window;
             hLP.at(n) = (wcLP / juce::MathConstants<double>::pi) * window;
