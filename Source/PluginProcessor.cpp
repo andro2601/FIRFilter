@@ -104,10 +104,6 @@ void FIRFilterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
     lowPass.prepare(spec);
     lowPass.reset();
 
-    // Resize the workbench buffer (no audio processing here, just memory allocation)
-    doubleBuffer.setSize(getMainBusNumOutputChannels(), samplesPerBlock);
-    doubleBuffer.clear(); // Ensure it starts at zero!
-
     updateCoefficients(sampleRate);
 }
 
@@ -151,24 +147,12 @@ void FIRFilterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i) {
         buffer.clear(i, 0, buffer.getNumSamples());
-        doubleBuffer.clear(i, 0, doubleBuffer.getNumSamples());
     }
 
     int numSamples = buffer.getNumSamples();
     int numChannels = buffer.getNumChannels();
 
     updateCoefficients(getSampleRate());
-
-    // Upsample to 64-bit (Float -> Double)
-    for (int ch = 0; ch < numChannels; ++ch)
-    {
-        auto* floatRead = buffer.getReadPointer(ch);
-        auto* doubleWrite = doubleBuffer.getWritePointer(ch);
-
-        for (int i = 0; i < numSamples; ++i) {
-            doubleWrite[i] = static_cast<double>(floatRead[i]);
-        }
-    }
 
     // Check if the buffer is silent
     if (buffer.getMagnitude(0, numSamples) < 0.000001f) // Roughly -120dB
@@ -184,27 +168,16 @@ void FIRFilterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         silentBlockCount = 0;
     }
 
-    juce::dsp::AudioBlock<double> doubleBlock(doubleBuffer.getArrayOfWritePointers(),
-        doubleBuffer.getNumChannels(),
+    juce::dsp::AudioBlock<float> block(buffer.getArrayOfWritePointers(),
+        buffer.getNumChannels(),
         numSamples);
 
     auto hpIsBypassed = parameters.getRawParameterValue("bypassHp")->load();
     auto lpIsBypassed = parameters.getRawParameterValue("bypassLp")->load();
 
-    if (!hpIsBypassed) highPass.process(juce::dsp::ProcessContextReplacing<double>(doubleBlock));
+    if (!hpIsBypassed) highPass.process(juce::dsp::ProcessContextReplacing<float>(block));
     
-    if (!lpIsBypassed) lowPass.process(juce::dsp::ProcessContextReplacing<double>(doubleBlock));
-
-    // Cast back to 32-bit (Double -> Float) for the DAW
-    for (int ch = 0; ch < numChannels; ++ch)
-    {
-        auto* doubleRead = doubleBuffer.getReadPointer(ch);
-        auto* floatWrite = buffer.getWritePointer(ch);
-
-        for (int i = 0; i < numSamples; ++i) {
-            floatWrite[i] = static_cast<float>(doubleRead[i]);
-        }
-    }
+    if (!lpIsBypassed) lowPass.process(juce::dsp::ProcessContextReplacing<float>(block));
 }
 
 void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
@@ -230,10 +203,6 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
     
     double wcHP = 2.0 * juce::MathConstants<double>::pi * hpCutoffDouble / sampleRate;
     double wcLP = 2.0 * juce::MathConstants<double>::pi * lpCutoffDouble / sampleRate;
-
-    static constexpr int maxM = 251;
-    std::vector<double> hHP(maxM, 0.0);
-    std::vector<double> hLP(maxM, 0.0);
 
     for (int n = 0; n < M; ++n)
     {
@@ -263,32 +232,40 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
         
         if (std::abs(n - delay) < 1e-9) // centralni član
         {
-            hHP.at(n) = (1.0 - (wcHP / juce::MathConstants<double>::pi)) * window;
-            hLP.at(n) = (wcLP / juce::MathConstants<double>::pi) * window;
+            hpCoeffs.at(n) = (1.0 - (wcHP / juce::MathConstants<double>::pi)) * window;
+            lpCoeffs.at(n) = (wcLP / juce::MathConstants<double>::pi) * window;
         }
         else
         {
-            hHP.at(n) = -std::sin(wcHP * (n - delay)) / (juce::MathConstants<double>::pi * (n - delay)) * window;
-            hLP.at(n) = std::sin(wcLP * (n - delay)) / (juce::MathConstants<double>::pi * (n - delay)) * window;
+            hpCoeffs.at(n) = -std::sin(wcHP * (n - delay)) / (juce::MathConstants<double>::pi * (n - delay)) * window;
+            lpCoeffs.at(n) = std::sin(wcLP * (n - delay)) / (juce::MathConstants<double>::pi * (n - delay)) * window;
         }
     }
 
-    *highPass.state = juce::dsp::FIR::Coefficients<double>::Coefficients(&hHP[0], hHP.size());
-    *lowPass.state = juce::dsp::FIR::Coefficients<double>::Coefficients(&hLP[0], hLP.size());
+    // 1. Wrap your raw data in a temporary AudioBuffer
+    // (1 channel, M samples)
+    juce::AudioBuffer<float> irHpBuffer(1, (int)M);
+    juce::AudioBuffer<float> irLpBuffer(1, (int)M);
 
-    /*auto& hpConvolution = filter.template get<0>();
-    hpConvolution.loadImpulseResponse(hHP.data(), maxM,
-        juce::dsp::Convolution::Stereo::no,
-        juce::dsp::Convolution::Trim::yes,
-        M,
-        juce::dsp::Convolution::Normalise::yes);
+    // 2. Copy your coefficients into the buffer
+    irHpBuffer.copyFrom(0, 0, hpCoeffs.data(), (int)M);
+    irLpBuffer.copyFrom(0, 0, lpCoeffs.data(), (int)M);
 
-    auto& lpConvolution = filter.template get<1>();
-    lpConvolution.loadImpulseResponse(hLP.data(), maxM,
-        juce::dsp::Convolution::Stereo::no,
-        juce::dsp::Convolution::Trim::yes,
-        M,
-        juce::dsp::Convolution::Normalise::yes);*/
+    highPass.loadImpulseResponse(
+        std::move(irHpBuffer),
+        getSampleRate(),
+        juce::dsp::Convolution::Stereo::yes,
+        juce::dsp::Convolution::Trim::no,
+        juce::dsp::Convolution::Normalise::yes
+    );
+
+    lowPass.loadImpulseResponse(
+        std::move(irLpBuffer),
+        getSampleRate(),
+        juce::dsp::Convolution::Stereo::yes,
+        juce::dsp::Convolution::Trim::no,
+        juce::dsp::Convolution::Normalise::yes
+    );
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout FIRFilterAudioProcessor::createParameterLayout() {

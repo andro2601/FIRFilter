@@ -59,12 +59,14 @@ public:
 
     //==============================================================================
     juce::AudioProcessorValueTreeState parameters;
-    juce::AudioBuffer<double> doubleBuffer;
 
 private:
     // Filters
-    using StereoFIR = juce::dsp::ProcessorDuplicator<juce::dsp::FIR::Filter<double>, juce::dsp::FIR::Coefficients<double>>;
-    StereoFIR highPass, lowPass;
+    juce::dsp::Convolution highPass{ juce::dsp::Convolution::Latency{ 0 } };
+    juce::dsp::Convolution lowPass{ juce::dsp::Convolution::Latency{ 0 } };
+
+	std::vector<float> hpCoeffs; // Coefficients for the high-pass filter
+	std::vector<float> lpCoeffs; // Coefficients for the low-pass filter
 
     // Stored values for knowing when to update coefficients
     float lastHpCutoff = -1.0f;  // Store last used HPF cutoff
