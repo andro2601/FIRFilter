@@ -199,7 +199,7 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
 	double lpCutoffDouble = static_cast<double>(lpCutoff);
 	double kaiserAlphaDouble = static_cast<double>(kaiserAlpha);
 
-	int M = std::pow(2,filterOrder+7)-1;
+    int M = (1 << (filterOrder + 7)) + 1;
 
     hpCoeffs.resize(M);
     lpCoeffs.resize(M);
@@ -278,7 +278,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FIRFilterAudioProcessor::cre
     parameters.push_back(std::make_unique<juce::AudioParameterChoice>(
         "filterOrder",
         "Filter Order",
-        juce::StringArray{ "126", "254", "510", "1022", "2046" },
+        juce::StringArray{ "128", "256", "512", "1024", "2048" },
         0
     ));
     parameters.push_back(std::make_unique<juce::AudioParameterChoice>(
