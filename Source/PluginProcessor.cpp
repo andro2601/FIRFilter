@@ -199,7 +199,7 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
 	double lpCutoffDouble = static_cast<double>(lpCutoff);
 	double kaiserAlphaDouble = static_cast<double>(kaiserAlpha);
 
-	int M = filterOrder+1;
+	int M = std::pow(2,filterOrder+7)-1;
 
     hpCoeffs.resize(M);
     lpCoeffs.resize(M);
@@ -275,11 +275,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FIRFilterAudioProcessor::cre
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> parameters;
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("hpCutoff", "High Pass Cutoff Frequency", juce::NormalisableRange<float>(10.f, 20000.f, 1.f, 0.5f, false), 10.f, juce::AudioParameterFloatAttributes()));
     parameters.push_back(std::make_unique<juce::AudioParameterFloat>("lpCutoff", "Low Pass Cutoff Frequency", juce::NormalisableRange<float>(10.f, 20000.f, 1.f, 0.5f, false), 20000.f, juce::AudioParameterFloatAttributes()));
-    parameters.push_back(std::make_unique<juce::AudioParameterFloat>(
+    parameters.push_back(std::make_unique<juce::AudioParameterChoice>(
         "filterOrder",
         "Filter Order",
-		juce::NormalisableRange<float>(10.f, 250.f, 10.f),
-		10, juce::AudioParameterFloatAttributes().withStringFromValueFunction([](int value, int) { return std::to_string(value+1) + " taps"; })
+        juce::StringArray{ "126", "254", "510", "1022", "2046" },
+        0
     ));
     parameters.push_back(std::make_unique<juce::AudioParameterChoice>(
         "window",

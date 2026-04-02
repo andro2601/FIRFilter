@@ -32,7 +32,7 @@ private:
     // Parameter Controls
     juce::Slider hpCutoffSlider;
     juce::Slider lpCutoffSlider;
-	juce::Slider filterOrderSlider;
+	juce::ComboBox filterOrderComboBox;
 	juce::ComboBox windowTypeComboBox;
 	juce::Slider kaiserAlphaSlider;
     juce::ToggleButton bypassHpButton;
@@ -48,7 +48,7 @@ private:
     // Attachments to sync GUI with parameters
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> hpCutoffAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lpCutoffAttachment;
-	std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> filterOrderAttachment;
+	std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> filterOrderAttachment;
 	std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> windowTypeAttachment;
 	std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> kaiserAlphaAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassHpAttachment;

@@ -34,9 +34,8 @@ FIRFilterAudioProcessorEditor::FIRFilterAudioProcessorEditor (FIRFilterAudioProc
     addAndMakeVisible(lpLabel);
 
     // Filter Order Slider
-    filterOrderSlider.setSliderStyle(Slider::Rotary);
-    filterOrderSlider.setTextBoxStyle(Slider::TextBoxBelow, false, 80, 20);
-    addAndMakeVisible(filterOrderSlider);
+    filterOrderComboBox.setJustificationType(Justification::centred);
+    addAndMakeVisible(filterOrderComboBox);
 
 	filterOrderLabel.setText("Filter Order", dontSendNotification);
 	//filterOrderLabel.attachToComponent(&filterOrderSlider, false);
@@ -82,8 +81,9 @@ FIRFilterAudioProcessorEditor::FIRFilterAudioProcessorEditor (FIRFilterAudioProc
     lpCutoffAttachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.parameters, "lpCutoff", lpCutoffSlider);
 
-    filterOrderAttachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.parameters, "filterOrder", filterOrderSlider);
+	filterOrderComboBox.addItemList(audioProcessor.parameters.getParameter("filterOrder")->getAllValueStrings(), 1);
+    filterOrderAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.parameters, "filterOrder", filterOrderComboBox);
 
     windowTypeComboBox.addItemList(audioProcessor.parameters.getParameter("window")->getAllValueStrings(), 1);
     windowTypeAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
@@ -150,7 +150,7 @@ void FIRFilterAudioProcessorEditor::resized()
     // 4. Filter Order (Smaller)
     auto orderArea = area.removeFromTop(smallRowHeight);
     filterOrderLabel.setBounds(orderArea.removeFromLeft(labelWidth));
-    filterOrderSlider.setBounds(orderArea);
+    filterOrderComboBox.setBounds(orderArea);
 
     // 5. Kaiser Alpha (Conditional & Smaller)
     if (kaiserAlphaSlider.isVisible())
