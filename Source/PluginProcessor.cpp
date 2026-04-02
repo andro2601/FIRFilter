@@ -200,6 +200,9 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
 	double kaiserAlphaDouble = static_cast<double>(kaiserAlpha);
 
 	int M = filterOrder+1;
+
+    hpCoeffs.resize(M);
+    lpCoeffs.resize(M);
     
     double wcHP = 2.0 * juce::MathConstants<double>::pi * hpCutoffDouble / sampleRate;
     double wcLP = 2.0 * juce::MathConstants<double>::pi * lpCutoffDouble / sampleRate;
@@ -256,7 +259,7 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
         getSampleRate(),
         juce::dsp::Convolution::Stereo::yes,
         juce::dsp::Convolution::Trim::no,
-        juce::dsp::Convolution::Normalise::yes
+        juce::dsp::Convolution::Normalise::no
     );
 
     lowPass.loadImpulseResponse(
@@ -264,7 +267,7 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
         getSampleRate(),
         juce::dsp::Convolution::Stereo::yes,
         juce::dsp::Convolution::Trim::no,
-        juce::dsp::Convolution::Normalise::yes
+        juce::dsp::Convolution::Normalise::no
     );
 }
 
