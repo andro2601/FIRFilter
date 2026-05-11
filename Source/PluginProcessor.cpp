@@ -243,7 +243,7 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
 	double lpCutoffDouble = static_cast<double>(lpCutoff);
 	double kaiserAlphaDouble = static_cast<double>(kaiserAlpha);
 
-    int M = (1 << (filterOrder + 7)) + 1;
+    int M = (1 << (filterOrder + 10)) + 1;
 
     hpCoeffs.resize(M);
     lpCoeffs.resize(M);
@@ -363,81 +363,35 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
 }
 
 void FIRFilterAudioProcessor::butterworthCoefficients(std::vector<std::complex<float>>& fftDataLp, std::vector<std::complex<float>>& fftDataHp, double lpCutoff, double hpCutoff, int filterOrder, double sampleRate) {
-    // -------------------------------------------------------------
-        // 1. TVOJ KOD ZA IZRAČUN IIR KOEFICIJENATA (Kaskada)
-        // -------------------------------------------------------------
-    std::vector<Biquad> lpStages;
-    std::vector<Biquad> hpStages;
-
-    double LPomega = 2.0 * juce::MathConstants<double>::pi * lpCutoff / sampleRate;
-    double LPsin = std::sin(LPomega);
-    double LPcos = std::cos(LPomega);
-
-    double HPomega = 2.0 * juce::MathConstants<double>::pi * hpCutoff / sampleRate;
-    double HPsin = std::sin(HPomega);
-    double HPcos = std::cos(HPomega);
-
-    double LPb0 = (1.0 - LPcos) / 2.0;
-    double LPb1 = 1.0 - LPcos;
-    double LPb2 = (1.0 - LPcos) / 2.0;
-    double LPa1 = -2.0 * LPcos;
-
-    double HPb0 = (1.0 + HPcos) / 2.0;
-    double HPb1 = -(1.0 + HPcos);
-    double HPb2 = (1.0 + HPcos) / 2.0;
-    double HPa1 = -2.0 * HPcos;
-
-    int N = filterOrder; // mora biti paran broj za ovu logiku (npr. 8)
-
-    for (int i = 0; i < filterOrder / 2; ++i) {
-        double Q = 1.0 / (2.0 * std::sin((2 * (i + 1) - 1) * juce::MathConstants<double>::pi / (2 * N)));
-
-        double LPalpha = LPsin / (2.0 * Q);
-        double LPa0 = 1.0 + LPalpha;
-        double LPa2 = 1.0 - LPalpha;
-
-        double HPalpha = HPsin / (2.0 * Q);
-        double HPa0 = 1.0 + HPalpha;
-        double HPa2 = 1.0 - HPalpha;
-
-        lpStages.push_back({ LPb0 / LPa0, LPb1 / LPa0, LPb2 / LPa0, 1.0, LPa1 / LPa0, LPa2 / LPa0 });
-        hpStages.push_back({ HPb0 / HPa0, HPb1 / HPa0, HPb2 / HPa0, 1.0, HPa1 / HPa0, HPa2 / HPa0 });
-    }
-
-    // -------------------------------------------------------------
-    // 2. IZRACUN FREKVENCIJSKOG ODZIVA (Transfer Funkcija H(z))
-    // -------------------------------------------------------------
+    // Prolazimo samo kroz prvu polovicu FFT buffera (od 0 Hz do Nyquista)
     for (int k = 0; k <= fftSize / 2; ++k)
     {
-        // Kutna frekvencija trenutnog bina
-        double w = 2.0 * juce::MathConstants<double>::pi * k / fftSize;
+        // Izračun stvarne frekvencije u Hz za trenutni FFT bin
+        double f = k * sampleRate / static_cast<double>(fftSize);
 
-        // Kompleksni brojevi za z^-1 i z^-2
-        // Eulerova formula: e^(-jw) = cos(-w) + j*sin(-w)
-        std::complex<double> z1(std::cos(-w), std::sin(-w));       // z^-1
-        std::complex<double> z2(std::cos(-2.0 * w), std::sin(-2.0 * w)); // z^-2
+        double magLP = 0.0;
+        double magHP = 0.0;
 
-        double magLP = 1.0;
-        double magHP = 1.0;
-
-        // Množimo magnitude svake biquad sekcije u kaskadi
-        for (size_t i = 0; i < lpStages.size(); ++i)
+        if (k == 0) // DC (0 Hz) - Poseban slučaj za sprječavanje dijeljenja s nulom kod HPF-a
         {
-            // H(z) = (b0 + b1*z^-1 + b2*z^-2) / (a0 + a1*z^-1 + a2*z^-2)
-            std::complex<double> numLP = lpStages[i].b0 + lpStages[i].b1 * z1 + lpStages[i].b2 * z2;
-            std::complex<double> denLP = lpStages[i].a0 + lpStages[i].a1 * z1 + lpStages[i].a2 * z2;
-            magLP *= std::abs(numLP / denLP);
+            magLP = 1.0;
+            magHP = 0.0;
+        }
+        else
+        {
+            // Analogna Butterworth formula za Low-Pass
+            magLP = 1.0 / std::sqrt(1.0 + std::pow(f / lpCutoff, 2.0 * filterOrder));
 
-            std::complex<double> numHP = hpStages[i].b0 + hpStages[i].b1 * z1 + hpStages[i].b2 * z2;
-            std::complex<double> denHP = hpStages[i].a0 + hpStages[i].a1 * z1 + hpStages[i].a2 * z2;
-            magHP *= std::abs(numHP / denHP);
+            // Analogna Butterworth formula za High-Pass
+            magHP = 1.0 / std::sqrt(1.0 + std::pow(hpCutoff / f, 2.0 * filterOrder));
         }
 
-        // Zapisujemo u FFT buffer (samo realni dio = linearna faza)
+        // Postavljamo samo realni dio (čime osiguravamo nultu/linearnu fazu)
         fftDataLp[k] = { static_cast<float>(magLP), 0.0f };
         fftDataHp[k] = { static_cast<float>(magHP), 0.0f };
 
-        // Zrcaljenje za IFFT
+        // Zrcaljenje za negativne frekvencije (druga polovica FFT buffera)
+        // Ovo je nužno kako bi IFFT na izlazu dao realan impulsni odziv bez imaginarnih artefakata
         if (k > 0 && k < fftSize / 2)
         {
             fftDataLp[fftSize - k] = fftDataLp[k];
@@ -453,7 +407,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout FIRFilterAudioProcessor::cre
     parameters.push_back(std::make_unique<juce::AudioParameterChoice>(
         "filterOrder",
         "Filter Order",
-        juce::StringArray{ "128", "256", "512", "1024", "2048" },
+        juce::StringArray{ "1024", "2048", "4096", "8192", "16384" },
         0
     ));
     parameters.push_back(std::make_unique<juce::AudioParameterChoice>(
