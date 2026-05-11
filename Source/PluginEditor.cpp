@@ -15,6 +15,9 @@ using namespace juce;
 FIRFilterAudioProcessorEditor::FIRFilterAudioProcessorEditor (FIRFilterAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
+	filterTypeComboBox.setJustificationType(Justification::centred);
+	addAndMakeVisible(filterTypeComboBox);
+
     // High-Pass Filter Slider
     hpCutoffSlider.setSliderStyle(Slider::Rotary);
     hpCutoffSlider.setTextBoxStyle(Slider::TextBoxBelow, false, 80, 20);
@@ -98,6 +101,10 @@ FIRFilterAudioProcessorEditor::FIRFilterAudioProcessorEditor (FIRFilterAudioProc
     bypassLpAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.parameters, "bypassLp", bypassLpButton);
 
+	filterTypeComboBox.addItemList(audioProcessor.parameters.getParameter("filterType")->getAllValueStrings(), 1);
+	filterTypeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+		audioProcessor.parameters, "filterType", filterTypeComboBox);
+
     // Make sure that before the constructor has finished, you've set the
     // editor's size to whatever you need it to be.
     setSize (400, 500);
@@ -125,6 +132,9 @@ void FIRFilterAudioProcessorEditor::resized()
     auto smallRowHeight = 80;
     auto labelWidth = 100;
     auto bypassHeight = 25; // Height for the bypass toggle
+
+	// 0. Filter Type ComboBox (Top)
+	filterTypeComboBox.setBounds(area.removeFromTop(30));
 
     // 1. High Pass (Large)
     auto hpArea = area.removeFromTop(mainRowHeight);

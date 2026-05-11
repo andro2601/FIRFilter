@@ -92,7 +92,7 @@ void FIRFilterAudioProcessor::changeProgramName (int index, const juce::String& 
 }
 
 //==============================================================================
-void FIRFilterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void FIRFilterAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     juce::dsp::ProcessSpec spec;
     spec.sampleRate = sampleRate;
@@ -104,7 +104,43 @@ void FIRFilterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
     lowPass.prepare(spec);
     lowPass.reset();
 
+    highPassChain.prepare(spec);
+    highPassChain.reset();
+    lowPassChain.prepare(spec);
+    lowPassChain.reset();
+
+    // Red 14 znači 2^14 = 16384 uzoraka. Ovo daje vrhunsku frekvencijsku rezoluciju.
+    int orderFFT = 14;
+    fftSize = 1 << orderFFT;
+
+    fsmFFT = std::make_unique<juce::dsp::FFT>(orderFFT);
+
+    // Alociramo buffere za kompleksne brojeve
+    fftDataLp.resize(fftSize, { 0.0f, 0.0f });
+    fftDataHp.resize(fftSize, { 0.0f, 0.0f });
+    timeDataLp.resize(fftSize, { 0.0f, 0.0f });
+    timeDataHp.resize(fftSize, { 0.0f, 0.0f });
+
+    /*
+    lowPassChain.setBypassed<0>(false);
+    lowPassChain.setBypassed<1>(true);
+    lowPassChain.setBypassed<2>(true);
+    lowPassChain.setBypassed<3>(true);
+    highPassChain.setBypassed<0>(false);
+    highPassChain.setBypassed<1>(true);
+    highPassChain.setBypassed<2>(true);
+    highPassChain.setBypassed<3>(true);
+    */
+
     updateCoefficients(sampleRate);
+
+    auto hpIsBypassed = parameters.getRawParameterValue("bypassHp")->load();
+    auto lpIsBypassed = parameters.getRawParameterValue("bypassLp")->load();
+
+    setLatencySamples(
+        (hpIsBypassed ? 0 : ((int)hpCoeffs.size() - 1) / 2) +
+        (lpIsBypassed ? 0 : ((int)lpCoeffs.size() - 1) / 2)
+    ); // Total latency is the sum of the latencies of both filters
 }
 
 void FIRFilterAudioProcessor::releaseResources()
@@ -186,14 +222,22 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
 	int filterOrder = static_cast<int>(parameters.getRawParameterValue("filterOrder")->load());
 	int windowType = static_cast<int>(parameters.getRawParameterValue("window")->load());
 	float kaiserAlpha = parameters.getRawParameterValue("kaiserAlpha")->load();
+	int filterType = static_cast<int>(parameters.getRawParameterValue("filterType")->load());
 
-    if (hpCutoff == lastHpCutoff && lpCutoff == lastLpCutoff && filterOrder == lastFilterOrder && windowType == lastWindow && kaiserAlpha == lastKaiserAlpha) return;
+    if (hpCutoff == lastHpCutoff && lpCutoff == lastLpCutoff && filterOrder == lastFilterOrder && windowType == lastWindow && kaiserAlpha == lastKaiserAlpha && filterType == lastFilterType) return;
     
+	bool updateCoefficients = false;
+	// ako je filter tip FSM (Butterworth), onda ćemo ažurirati koeficijente samo ako su se cutoff frekvencije ili tip filtra promijenili
+	if (filterType == 1 && !(hpCutoff == lastHpCutoff && lpCutoff == lastLpCutoff && filterType == lastFilterType)) {
+		updateCoefficients = true;
+	}
+
     lastHpCutoff = hpCutoff;
     lastLpCutoff = lpCutoff;
 	lastFilterOrder = filterOrder;
 	lastWindow = windowType;
 	lastKaiserAlpha = kaiserAlpha;
+	lastFilterType = filterType;
 
 	double hpCutoffDouble = static_cast<double>(hpCutoff);
 	double lpCutoffDouble = static_cast<double>(lpCutoff);
@@ -233,20 +277,67 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
 				break;
         }
         
-        if (std::abs(n - delay) < 1e-9) // centralni član
-        {
-            hpCoeffs.at(n) = (1.0 - (wcHP / juce::MathConstants<double>::pi)) * window;
-            lpCoeffs.at(n) = (wcLP / juce::MathConstants<double>::pi) * window;
+        if (filterType == 0) {
+            if (std::abs(n - delay) < 1e-9) // centralni član
+            {
+                hpCoeffs.at(n) = (1.0 - (wcHP / juce::MathConstants<double>::pi)) * window;
+                lpCoeffs.at(n) = (wcLP / juce::MathConstants<double>::pi) * window;
+            }
+            else
+            {
+                hpCoeffs.at(n) = -std::sin(wcHP * (n - delay)) / (juce::MathConstants<double>::pi * (n - delay)) * window;
+                lpCoeffs.at(n) = std::sin(wcLP * (n - delay)) / (juce::MathConstants<double>::pi * (n - delay)) * window;
+            }
         }
-        else
-        {
-            hpCoeffs.at(n) = -std::sin(wcHP * (n - delay)) / (juce::MathConstants<double>::pi * (n - delay)) * window;
-            lpCoeffs.at(n) = std::sin(wcLP * (n - delay)) / (juce::MathConstants<double>::pi * (n - delay)) * window;
+
+        else {
+            hpCoeffs.at(n) = window;
+			lpCoeffs.at(n) = window;
         }
     }
 
-    // 1. Wrap your raw data in a temporary AudioBuffer
-    // (1 channel, M samples)
+    if (filterType==1) // FSM (Butterworth)
+    {
+        if (updateCoefficients) {
+            butterworthCoefficients(fftDataLp, fftDataHp, lpCutoffDouble, hpCutoffDouble, 8, sampleRate);
+
+            // 3. INVERZNI FFT
+            fsmFFT->perform(fftDataLp.data(), timeDataLp.data(), true);
+            fsmFFT->perform(fftDataHp.data(), timeDataHp.data(), true);
+        }
+
+        // Kako IFFT raspoređuje podatke sa fazom 0:
+            // n=0 je vrhunac impulsa. 
+            // n=1, 2, 3... su uzorci koji slijede nakon vrhunca (desna strana).
+            // n=fftSize-1, fftSize-2... su uzorci prije vrhunca (lijeva strana, wrap-around).
+        int centerTap = (M - 1) / 2;
+
+        // KLJUČNO SKALIRANJE JUCE FFT-a! Bez ovoga signal ide u Infinity.
+        double scale = 1.0; // static_cast<double>(fftSize);
+
+        for (int n = 0; n < M; ++n)
+        {
+            // Moramo prebaciti taj raspored u naš linearni M-buffer tako da vrhunac bude u centru (centerTap).
+            int t = n - centerTap;
+            double valLP = 0.0;
+            double valHP = 0.0;
+
+            if (t >= 0) {
+                // Čitamo iz timeData i skaliramo
+                valLP = timeDataLp[t].real() * scale;
+                valHP = timeDataHp[t].real() * scale;
+            }
+            else {
+                // Očitavamo s kraja buffera i skaliramo
+                valLP = timeDataLp[fftSize + t].real() * scale;
+                valHP = timeDataHp[fftSize + t].real() * scale;
+            }
+
+            hpCoeffs[n] *= valHP;
+            lpCoeffs[n] *= valLP;
+        }
+    }
+
     juce::AudioBuffer<float> irHpBuffer(1, (int)M);
     juce::AudioBuffer<float> irLpBuffer(1, (int)M);
 
@@ -269,6 +360,90 @@ void FIRFilterAudioProcessor::updateCoefficients(double sampleRate) {
         juce::dsp::Convolution::Trim::no,
         juce::dsp::Convolution::Normalise::no
     );
+}
+
+void FIRFilterAudioProcessor::butterworthCoefficients(std::vector<std::complex<float>>& fftDataLp, std::vector<std::complex<float>>& fftDataHp, double lpCutoff, double hpCutoff, int filterOrder, double sampleRate) {
+    // -------------------------------------------------------------
+        // 1. TVOJ KOD ZA IZRAČUN IIR KOEFICIJENATA (Kaskada)
+        // -------------------------------------------------------------
+    std::vector<Biquad> lpStages;
+    std::vector<Biquad> hpStages;
+
+    double LPomega = 2.0 * juce::MathConstants<double>::pi * lpCutoff / sampleRate;
+    double LPsin = std::sin(LPomega);
+    double LPcos = std::cos(LPomega);
+
+    double HPomega = 2.0 * juce::MathConstants<double>::pi * hpCutoff / sampleRate;
+    double HPsin = std::sin(HPomega);
+    double HPcos = std::cos(HPomega);
+
+    double LPb0 = (1.0 - LPcos) / 2.0;
+    double LPb1 = 1.0 - LPcos;
+    double LPb2 = (1.0 - LPcos) / 2.0;
+    double LPa1 = -2.0 * LPcos;
+
+    double HPb0 = (1.0 + HPcos) / 2.0;
+    double HPb1 = -(1.0 + HPcos);
+    double HPb2 = (1.0 + HPcos) / 2.0;
+    double HPa1 = -2.0 * HPcos;
+
+    int N = filterOrder; // mora biti paran broj za ovu logiku (npr. 8)
+
+    for (int i = 0; i < filterOrder / 2; ++i) {
+        double Q = 1.0 / (2.0 * std::sin((2 * (i + 1) - 1) * juce::MathConstants<double>::pi / (2 * N)));
+
+        double LPalpha = LPsin / (2.0 * Q);
+        double LPa0 = 1.0 + LPalpha;
+        double LPa2 = 1.0 - LPalpha;
+
+        double HPalpha = HPsin / (2.0 * Q);
+        double HPa0 = 1.0 + HPalpha;
+        double HPa2 = 1.0 - HPalpha;
+
+        lpStages.push_back({ LPb0 / LPa0, LPb1 / LPa0, LPb2 / LPa0, 1.0, LPa1 / LPa0, LPa2 / LPa0 });
+        hpStages.push_back({ HPb0 / HPa0, HPb1 / HPa0, HPb2 / HPa0, 1.0, HPa1 / HPa0, HPa2 / HPa0 });
+    }
+
+    // -------------------------------------------------------------
+    // 2. IZRACUN FREKVENCIJSKOG ODZIVA (Transfer Funkcija H(z))
+    // -------------------------------------------------------------
+    for (int k = 0; k <= fftSize / 2; ++k)
+    {
+        // Kutna frekvencija trenutnog bina
+        double w = 2.0 * juce::MathConstants<double>::pi * k / fftSize;
+
+        // Kompleksni brojevi za z^-1 i z^-2
+        // Eulerova formula: e^(-jw) = cos(-w) + j*sin(-w)
+        std::complex<double> z1(std::cos(-w), std::sin(-w));       // z^-1
+        std::complex<double> z2(std::cos(-2.0 * w), std::sin(-2.0 * w)); // z^-2
+
+        double magLP = 1.0;
+        double magHP = 1.0;
+
+        // Množimo magnitude svake biquad sekcije u kaskadi
+        for (size_t i = 0; i < lpStages.size(); ++i)
+        {
+            // H(z) = (b0 + b1*z^-1 + b2*z^-2) / (a0 + a1*z^-1 + a2*z^-2)
+            std::complex<double> numLP = lpStages[i].b0 + lpStages[i].b1 * z1 + lpStages[i].b2 * z2;
+            std::complex<double> denLP = lpStages[i].a0 + lpStages[i].a1 * z1 + lpStages[i].a2 * z2;
+            magLP *= std::abs(numLP / denLP);
+
+            std::complex<double> numHP = hpStages[i].b0 + hpStages[i].b1 * z1 + hpStages[i].b2 * z2;
+            std::complex<double> denHP = hpStages[i].a0 + hpStages[i].a1 * z1 + hpStages[i].a2 * z2;
+            magHP *= std::abs(numHP / denHP);
+        }
+
+        // Zapisujemo u FFT buffer (samo realni dio = linearna faza)
+        fftDataLp[k] = { static_cast<float>(magLP), 0.0f };
+        fftDataHp[k] = { static_cast<float>(magHP), 0.0f };
+
+        // Zrcaljenje za IFFT
+        if (k > 0 && k < fftSize / 2)
+        {
+            fftDataLp[fftSize - k] = fftDataLp[k];
+            fftDataHp[fftSize - k] = fftDataHp[k];
+        }
+    }
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout FIRFilterAudioProcessor::createParameterLayout() {
@@ -296,6 +471,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout FIRFilterAudioProcessor::cre
     ));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("bypassHp", "Bypass HP", false));
     parameters.push_back(std::make_unique<juce::AudioParameterBool>("bypassLp", "Bypass LP", false));
+	parameters.push_back(std::make_unique<juce::AudioParameterChoice>(
+		"filterType",
+		"Filter Type",
+		juce::StringArray{ "Windowing Method", "FSM (Butterworth)" },
+		0
+	));
 
     return { parameters.begin(), parameters.end() };
 }
@@ -324,19 +505,18 @@ void FIRFilterAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 
 void FIRFilterAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // 1. Convert the binary block back into XML
     std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
 
-    if (xmlState.get() != nullptr)
+    if (xmlState != nullptr)
     {
-        // 2. Check if the XML tag matches your ValueTree name
         if (xmlState->hasTagName(parameters.state.getType()))
         {
-            // 3. Update the APVTS, which automatically updates your sliders
             parameters.replaceState(juce::ValueTree::fromXml(*xmlState));
 
-            // 4. IMPORTANT: Manually trigger your filter update!
-            updateCoefficients(getSampleRate());
+            // Provjeri je li sample rate važeći prije poziva!
+            auto rate = getSampleRate();
+            if (rate > 0.0)
+                updateCoefficients(rate);
         }
     }
 }

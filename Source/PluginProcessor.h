@@ -55,10 +55,15 @@ public:
 
     //==============================================================================
     void updateCoefficients(double sampleRate);
+    void butterworthCoefficients(std::vector<std::complex<float>>& fftDataLp, std::vector<std::complex<float>>& fftDataHp, double lpCutoff, double hpCutoff, int filterOrder, double sampleRate);
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     //==============================================================================
     juce::AudioProcessorValueTreeState parameters;
+
+    struct Biquad {
+        double b0, b1, b2, a0, a1, a2;
+    };
 
 private:
     // Filters
@@ -68,12 +73,26 @@ private:
 	std::vector<float> hpCoeffs; // Coefficients for the high-pass filter
 	std::vector<float> lpCoeffs; // Coefficients for the low-pass filter
 
+	// FSM states for filter coefficient updates
+    using StereoIIR = juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<double>, juce::dsp::IIR::Coefficients<double>>;
+    using FilterChain = juce::dsp::ProcessorChain<StereoIIR, StereoIIR, StereoIIR, StereoIIR>;
+    FilterChain highPassChain, lowPassChain;
+    juce::AudioBuffer<double> impBufferHp;
+    juce::AudioBuffer<double> impBufferLp;
+    std::unique_ptr<juce::dsp::FFT> fsmFFT;
+    std::vector<std::complex<float>> fftDataLp;
+    std::vector<std::complex<float>> fftDataHp;
+    std::vector<std::complex<float>> timeDataLp;
+    std::vector<std::complex<float>> timeDataHp;
+    int fftSize;
+
     // Stored values for knowing when to update coefficients
     float lastHpCutoff = -1.0f;  // Store last used HPF cutoff
     float lastLpCutoff = -1.0f;  // Store last used LPF cutoff
     int lastFilterOrder = -1; // Store last used steepness index
 	int lastWindow = -1; // Store last used approximation index
 	float lastKaiserAlpha = -1.0f; // Store last used Kaiser alpha
+	int lastFilterType = -1; // Store last used filter type index
 
 	int silentBlockCount = 0; // Counter for consecutive silent blocks
 

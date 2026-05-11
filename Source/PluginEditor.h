@@ -37,7 +37,7 @@ private:
 	juce::Slider kaiserAlphaSlider;
     juce::ToggleButton bypassHpButton;
     juce::ToggleButton bypassLpButton;
-    
+	juce::ComboBox filterTypeComboBox;
 
     // Labels
     juce::Label hpLabel;
@@ -53,6 +53,7 @@ private:
 	std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> kaiserAlphaAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassHpAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassLpAttachment;
+	std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> filterTypeAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FIRFilterAudioProcessorEditor)
 };
