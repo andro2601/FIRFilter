@@ -58,8 +58,8 @@ FIRFilterAudioProcessorEditor::FIRFilterAudioProcessorEditor (FIRFilterAudioProc
 	addAndMakeVisible(kaiserAlphaLabel);
 
     // Initial visibility check
-    kaiserAlphaSlider.setVisible(false);
-    kaiserAlphaLabel.setVisible(false);
+    kaiserAlphaSlider.setEnabled(false);
+    kaiserAlphaLabel.setEnabled(false);
 
     // Bypass buttons
     addAndMakeVisible(bypassHpButton);
@@ -71,8 +71,8 @@ FIRFilterAudioProcessorEditor::FIRFilterAudioProcessorEditor (FIRFilterAudioProc
     windowTypeComboBox.onChange = [this]
         {
             bool isKaiser = (windowTypeComboBox.getSelectedId() == 4); // "Kaiser" is index 3, ID 4
-            kaiserAlphaSlider.setVisible(isKaiser);
-            kaiserAlphaLabel.setVisible(isKaiser);
+            kaiserAlphaSlider.setEnabled(isKaiser);
+            kaiserAlphaLabel.setEnabled(isKaiser);
             resized();
         };
 
@@ -107,7 +107,7 @@ FIRFilterAudioProcessorEditor::FIRFilterAudioProcessorEditor (FIRFilterAudioProc
 
     // Make sure that before the constructor has finished, you've set the
     // editor's size to whatever you need it to be.
-    setSize (400, 500);
+    setSize (400, 550);
 }
 
 FIRFilterAudioProcessorEditor::~FIRFilterAudioProcessorEditor()

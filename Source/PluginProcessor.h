@@ -55,35 +55,21 @@ public:
 
     //==============================================================================
     void updateCoefficients(double sampleRate);
-    void butterworthCoefficients(std::vector<std::complex<float>>& fftDataLp, std::vector<std::complex<float>>& fftDataHp, double lpCutoff, double hpCutoff, int filterOrder, double sampleRate);
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     //==============================================================================
     juce::AudioProcessorValueTreeState parameters;
 
-    struct Biquad {
-        double b0, b1, b2, a0, a1, a2;
-    };
-
 private:
     // Filters
-    juce::dsp::Convolution highPass{ juce::dsp::Convolution::Latency{ 0 } };
-    juce::dsp::Convolution lowPass{ juce::dsp::Convolution::Latency{ 0 } };
+    juce::dsp::Convolution conv{ juce::dsp::Convolution::Latency{ 1024 } };
 
-	std::vector<float> hpCoeffs; // Coefficients for the high-pass filter
-	std::vector<float> lpCoeffs; // Coefficients for the low-pass filter
+    std::vector<float> coeffs;
 
 	// FSM states for filter coefficient updates
-    using StereoIIR = juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<double>, juce::dsp::IIR::Coefficients<double>>;
-    using FilterChain = juce::dsp::ProcessorChain<StereoIIR, StereoIIR, StereoIIR, StereoIIR>;
-    FilterChain highPassChain, lowPassChain;
-    juce::AudioBuffer<double> impBufferHp;
-    juce::AudioBuffer<double> impBufferLp;
     std::unique_ptr<juce::dsp::FFT> fsmFFT;
-    std::vector<std::complex<float>> fftDataLp;
-    std::vector<std::complex<float>> fftDataHp;
-    std::vector<std::complex<float>> timeDataLp;
-    std::vector<std::complex<float>> timeDataHp;
+    std::vector<std::complex<float>> fftData;
+    std::vector<std::complex<float>> timeData;
     int fftSize;
 
     // Stored values for knowing when to update coefficients
@@ -93,6 +79,8 @@ private:
 	int lastWindow = -1; // Store last used approximation index
 	float lastKaiserAlpha = -1.0f; // Store last used Kaiser alpha
 	int lastFilterType = -1; // Store last used filter type index
+    bool lpLastBypassed = false;
+    bool hpLastBypassed = false;
 
 	int silentBlockCount = 0; // Counter for consecutive silent blocks
 
